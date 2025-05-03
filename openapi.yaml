@@ -1,0 +1,147 @@
+openapi: 3.1.0
+info:
+  title: Digit Recognition
+  version: '1.0'
+  description: An experimental client/server application for 0-9 digit image recognition with optional modification of the digit image
+  contact:
+    name: Roman Szarowski
+tags:
+  - name: digit-recognition
+    description: A digit recognition client/server application
+paths:
+  /status:
+    get:
+      summary: Check status of training of 60000 grayscale 28x28 PNG digit image indices
+      operationId: training-status
+      tags:
+        - digit-recognition
+      responses:
+        '200':
+          description: OK
+          $ref: '#/components/responses/StatusResponse'
+      parameters: [ ]
+  /digits:
+    get:
+      summary: Retrieve a grayscale 28x28 PNG digit image sample by image index from 0 to 9999
+      operationId: retrieve-digit
+      tags:
+        - digit-recognition
+      responses:
+        '200':
+          description: OK
+          content:
+            image/png:
+              schema: { }
+          headers:
+            X-Digit-Expected:
+              schema:
+                type: integer
+              description: 'A digit to recognize'
+      parameters:
+        - schema:
+            type: integer
+          in: query
+          name: id
+          description: 'A sample image ID from the MNIST test dataset'
+          required: true
+  /digits/{digit}/indices/{id}:
+    parameters:
+      - schema:
+          format: int8
+          type: integer
+        name: digit
+        in: path
+        required: true
+        description: A digit to be recognized in the digit image
+      - schema:
+          type: integer
+        name: id
+        in: path
+        required: true
+        description: An id of the digit image sample index
+    post:
+      summary: Recognize a grayscale 28x28 digit PNG image provided in the request body
+      operationId: recognize-digit
+      tags:
+        - digit-recognition
+      requestBody:
+        content:
+          image/png:
+            schema: { }
+      responses:
+        '200':
+          description: OK
+          $ref: '#/components/responses/RecognitionResponse'
+      parameters: [ ]
+components:
+  parameters: { }
+  responses:
+    StatusResponse:
+      description: 'Recognition Training Status Response'
+      content:
+        application/json:
+          schema:
+            type: object
+            $ref: '#/components/schemas/IndexStatus'
+    RecognitionResponse:
+      description: 'Digit Recognition Response'
+      content:
+        application/json:
+          schema:
+            type: object
+            $ref: '#/components/schemas/Statistics'
+  schemas:
+    IndexStatus:
+      title: IndexStatus
+      type: object
+      description: 'Index Training Status'
+      properties:
+        indexCount:
+          type: integer
+        indicesStored:
+          type: integer
+      required:
+        - indexCount
+        - indicesStored
+    Statistics:
+      title: Statistics
+      type: object
+      description: 'Digit Recognition Statistics'
+      properties:
+        digitIndex:
+          type: integer
+        digitExpected:
+          format: int8
+          type: integer
+        digitFound:
+          format: int8
+          type: integer
+        success:
+          type: boolean
+        correctGuesses:
+          type: integer
+        wrongGuesses:
+          type: integer
+        duration:
+          format: int64
+          type: integer
+        minDuration:
+          format: int64
+          type: integer
+        maxDuration:
+          format: int64
+          type: integer
+        totalDuration:
+          format: int64
+          type: integer
+      required:
+        - digitIndex
+        - digitExpected
+        - digitFound
+        - success
+        - correctGuesses
+        - wrongGuesses
+        - duration
+        - minDuration
+        - maxDuration
+        - totalDuration

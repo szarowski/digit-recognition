@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Display Image from Server</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 80vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        canvas {
+            border: 1px solid #ddd;
+            background-color: #eee;
+            max-width: 80%;
+            height: auto;
+        }
+        .color-options {
+            margin-top: 20px;
+            margin-bottom: 20px;
+        }
+        #error-message {
+            color: red;
+            margin-top: 10px;
+            font-size: 0.9em;
+            /* Prevent element from affecting layout: */
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            text-align: center;
+            padding: 5px;
+        }
+        #loading-indicator {
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #555;
+            /* Prevent element from affecting layout: */
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            text-align: center;
+            padding: 5px;
+        }
+        table {
+            margin-left: auto;
+            margin-right: auto;
+            border-collapse: collapse; /* Remove default table border spacing */
+        }
+
+        .label-cell {
+            text-align: right; /* Align label text to the right */
+            padding-right: 10px; /* Add spacing between label and input/span */
+            padding-top: 5px; /* Add some vertical padding */
+            padding-bottom: 5px;
+        }
+
+        .input-cell {
+            padding-top: 5px;
+            padding-bottom: 5px;
+        }
+
+        .digit-input {
+            width: 30px;
+            text-align: center;
+            padding: 5px;
+            border-radius: 3px;
+            display: inline-block; /* Important for the span in "Found Digit" */
+        }
+
+        .digit-span {
+            width: 30px;
+            text-align: center;
+            display: inline-block; /* Important for the span in "Found Digit" */
+        }
+
+        label[for] {
+            margin-bottom: 0; /* Remove default label bottom margin */
+        }
+
+        .digit-button {
+            background-color: white;
+            padding: 8px 12px; /* Adjust padding as needed */
+            margin-bottom: 10px;
+            cursor: pointer;
+        }
+    </style>
+    <script>
+        const pixelSize = 4;
+        const maxImages = 9999;
+
+        let indicesStored
+        let currentImageID = 0; // Start with image ID 0
+        let label;
+        let drawing = false;
+        let selectedColor;
+
+        function validateInput(inputElement) {
+            if (inputElement.value < 0) {
+                inputElement.value = 0;
+                label = 0;
+            } else if (inputElement.value > 9) {
+                inputElement.value = 9;
+                label = 9;
+            } else if (isNaN(parseInt(inputElement.value))) {
+                inputElement.value = ''; // Clear non-numeric input
+                label = 0;
+            }
+        }
+
+        window.onload = function() {
+            updateSelectedColor('white');
+
+            const digitCanvas = document.getElementById('digit-canvas');
+
+            digitCanvas.addEventListener('mousedown', (event) => {
+                drawing = true;
+                drawPixel(event.offsetX, event.offsetY, selectedColor);
+            });
+
+            digitCanvas.addEventListener('mousemove', (event) => {
+                if (drawing) {
+                    drawPixel(event.offsetX, event.offsetY, selectedColor);
+                }
+            });
+
+            digitCanvas.addEventListener('mouseup', () => {
+                drawing = false;
+            });
+
+            digitCanvas.addEventListener('mouseleave', () => {
+                drawing = false;
+            });
+
+            retrieve();
+
+            function handleTrainingStatus() {
+                fetch('/status')
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log(data.indicesStored)
+                        showLoadingIndicatorAtStartup(data.indicesStored, data.indexCount)
+                        if (data.indicesStored + 1 === data.indexCount) {
+                            clearInterval(intervalId);
+                            console.log('Server is trained. Stopping train checks.');
+                            hideLoadingIndicator()
+                        } else if (indicesStored === data.indicesStored) {
+                            clearInterval(intervalId);
+                            console.error('Error checking server training:');
+                            hideLoadingIndicator()
+                        }
+                        indicesStored = data.indicesStored
+                    })
+                    .catch(error => {
+                        clearInterval(intervalId);
+                        console.error('Error checking server training:', error);
+                        hideLoadingIndicator()
+                    });
+            }
+
+            // Call the training status function immediately when the page loads
+            handleTrainingStatus();
+
+            // Set up the interval to call the training status check function every 3 seconds
+            intervalId = setInterval(handleTrainingStatus, 3000);
+        }
+
+        function updateSelectedColor(color) {
+            selectedColor = color;
+        }
+
+        function empty() {
+            const digitCanvas = document.getElementById('digit-canvas');
+            const ctx = digitCanvas.getContext('2d');
+
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, digitCanvas.width, digitCanvas.height);
+
+            const digitExpected = document.getElementById('digit-expected');
+            digitExpected.value = 1;
+        }
+
+        function previous() {
+            if (--currentImageID < 0) {
+                currentImageID = maxImages;
+            }
+            retrieve();
+        }
+
+        function next() {
+            if (++currentImageID > maxImages) {
+                currentImageID = 0;
+            }
+            retrieve();
+        }
+
+        function drawPixel(x, y, color) {
+            const digitCanvas = document.getElementById('digit-canvas');
+            const ctx = digitCanvas.getContext('2d');
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, pixelSize, pixelSize);
+        }
+
+        function retrieve() {
+            const digitIndex = document.getElementById('digit-index');
+            digitIndex.textContent = currentImageID;
+            const digitCanvas = document.getElementById('digit-canvas');
+            const ctx = digitCanvas.getContext('2d');
+
+            // Function to fetch the image data from the server
+            showLoadingIndicator();
+            fetch(`/digits?id=${currentImageID}`) //  Corrected endpoint
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const digitExpectedValue = response.headers.get('X-Digit-Expected');
+                    if (digitExpectedValue) {
+                        const digitExpected = document.getElementById('digit-expected');
+                        digitExpected.value = digitExpectedValue;
+                    }
+
+                    return response.blob();
+                })
+                .then(blob => {
+                    drawImageFromBlob(blob);
+                    if (currentImageID > maxImages) {
+                        currentImageID = 0;
+                    }
+                })
+                .catch(error => {
+                    console.error("Error fetching image:", error);
+                    displayErrorMessage("Error fetching image from the server.");
+                    hideLoadingIndicator();
+                });
+
+            // Function to draw the image from a Blob onto the digit-canvas
+            function drawImageFromBlob(blob) {
+                const img = new Image();
+                img.onload = function () {
+                    ctx.clearRect(0, 0, digitCanvas.width, digitCanvas.height);
+
+                    const originalWidth = img.naturalWidth;
+                    const originalHeight = img.naturalHeight;
+
+                    const displayWidth = originalWidth * pixelSize;
+                    const displayHeight = originalHeight * pixelSize;
+
+                    digitCanvas.width = displayWidth;
+                    digitCanvas.height = displayHeight;
+
+                    for (let y = 0; y < originalHeight; y++) {
+                        for (let x = 0; x < originalWidth; x++) {
+                            // Get the color of the original pixel
+                            const sourceX = x;
+                            const sourceY = y;
+
+                            //create a temporary digitCanvas to read pixel data
+                            const tempCanvas = document.createElement('canvas');
+                            const tempCtx = tempCanvas.getContext('2d');
+                            tempCanvas.width = originalWidth;
+                            tempCanvas.height = originalHeight;
+                            tempCtx.drawImage(img, 0, 0, originalWidth, originalHeight);
+
+                            const pixelColor = tempCtx.getImageData(sourceX, sourceY, 1, 1).data;
+                            const r = pixelColor[0];
+                            const g = pixelColor[1];
+                            const b = pixelColor[2];
+                            const a = pixelColor[3];
+
+                            ctx.fillStyle = `rgba(${r},${g},${b},${a / 255})`; // Use the color
+
+                            // Draw the 4x4 square
+                            ctx.fillRect(x * pixelSize, y * pixelSize, pixelSize, pixelSize);
+                        }
+                    }
+                    hideLoadingIndicator();
+                };
+                img.onerror = function (error) {
+                    console.error("Error loading image:", error);
+                    displayErrorMessage("Error loading image from server.");
+                    hideLoadingIndicator();
+                }
+                img.src = URL.createObjectURL(blob);
+            }
+        }
+
+        function recognize() {
+            const digitCanvas = document.getElementById('digit-canvas');
+            // Create a new canvas for the resized image
+            const resizedCanvas = document.createElement('canvas');
+            const resizedWidth = digitCanvas.width / pixelSize;  // 4 times smaller in area = half the width and height
+            const resizedHeight = digitCanvas.height / pixelSize;
+            resizedCanvas.width = resizedWidth;
+            resizedCanvas.height = resizedHeight;
+            const resizedCtx = resizedCanvas.getContext('2d');
+
+            // Draw the original image onto the resized canvas, effectively downscaling it.
+            resizedCtx.drawImage(digitCanvas, 0, 0, digitCanvas.width, digitCanvas.height, 0, 0, resizedWidth, resizedHeight);
+
+            // Convert the resized canvas to a Blob and store it
+            resizedCanvas.toBlob(function (blob) {
+                recognizeCanvasData(blob);
+            }, 'image/png');
+
+            function recognizeCanvasData(blob) {
+                const digitIndex = document.getElementById('digit-index');
+                const digitFound = document.getElementById('digit-found');
+                const digitExpected = document.getElementById('digit-expected');
+                const success = document.getElementById('success');
+                const duration = document.getElementById('duration');
+                const maxDuration = document.getElementById('max-duration');
+                const minDuration = document.getElementById('min-duration');
+                const totalDuration = document.getElementById('total-duration');
+                const correctGuesses = document.getElementById('correct-guesses');
+                const wrongGuesses = document.getElementById('wrong-guesses');
+                fetch(`/digits/${digitExpected.value}/indices/${currentImageID}`, {
+                    method: 'POST',
+                    body: blob,
+                    headers: {
+                        'Content-Type': 'image/png',
+                    },
+                })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Failed to post image data');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('Server response:', data);
+                        digitIndex.textContent = data.digitIndex;
+                        digitFound.textContent = data.digitFound;
+                        success.textContent = data.success ? "CORRECT" : " WRONG";
+                        duration.textContent = data.duration;
+                        maxDuration.textContent = data.maxDuration;
+                        minDuration.textContent = data.minDuration;
+                        totalDuration.textContent = data.totalDuration;
+                        correctGuesses.textContent = data.correctGuesses;
+                        wrongGuesses.textContent = data.wrongGuesses;
+                    })
+                    .catch(error => {
+                        console.error('Error posting image data:', error);
+                        displayErrorMessage('Error sending image data to server.');
+                    });
+            }
+        }
+
+        function displayErrorMessage(message) {
+            const errorElement = document.getElementById('error-message');
+            errorElement.textContent = message;
+            errorElement.style.display = 'block';
+
+            setTimeout(clearErrorMessage, 5000);
+        }
+
+        function clearErrorMessage() {
+            document.getElementById('error-message').style.display = 'none';
+        }
+
+        function showLoadingIndicatorAtStartup(indicesStored, indexCount) {
+            const loadingIndicator = document.getElementById('loading-indicator');
+            loadingIndicator.textContent = `Training the dataset of digits... Created ${indicesStored} out of ${indexCount} indices.`;
+            loadingIndicator.style.display = 'block';
+        }
+
+        function showLoadingIndicator() {
+            const loadingIndicator = document.getElementById('loading-indicator');
+            loadingIndicator.textContent = 'Loading image...';
+            loadingIndicator.style.display = 'block';
+        }
+
+        function hideLoadingIndicator() {
+            const loadingIndicator = document.getElementById('loading-indicator');
+            loadingIndicator.style.display = 'none';
+        }
+    </script>
+</head>
+<body>
+<h1>Digit Recognition</h1>
+
+<h2>Digit Image from Server</h2>
+
+<canvas id="digit-canvas" title="Digit Display Area" width="112" height="112"></canvas>
+
+<div class="color-options">Mouse Color:
+    <label>
+        <input type="radio" name="color" value="white" onchange="updateSelectedColor(this.value)" checked="checked"> White
+    </label>
+    <label>
+        <input type="radio" name="color" value="black" onchange="updateSelectedColor(this.value)"> Black
+    </label>
+</div>
+
+<div class="input-group">
+    <button id="empty" class="digit-button" onclick="empty()">Empty</button>
+    <button id="retrieve" class="digit-button" onclick="retrieve()">Refresh</button>
+    <button id="previous" class="digit-button" onclick="previous()">Previous</button>
+    <button id="next" class="digit-button" onclick="next()">Next</button>
+    <button id="recognize" class="digit-button" onclick="recognize()">Recognize</button>
+</div>
+
+<table>
+    <tbody>
+    <tr>
+        <td class="label-cell">
+            <span class="recognition-label">Sample Digit Image Index:</span>
+        </td>
+        <td class="input-cell">
+            <label for="digit-index">
+                <span class="digit-span" id="digit-index"></span>
+            </label>
+        </td>
+    </tr>
+    <tr>
+        <td class="label-cell">
+            <span class="recognition-label">Digit Expected:</span>
+        </td>
+        <td class="input-cell">
+            <label for="digit-expected">
+                <input type="number" class="digit-input" id="digit-expected" min="0" max="9" value="0" oninput="validateInput(this)">
+            </label>
+        </td>
+    </tr>
+    <tr>
+        <td class="label-cell">
+            <span class="recognition-label">Digit Found:</span>
+        </td>
+        <td class="input-cell">
+            <label for="digit-found">
+                <span class="digit-span" id="digit-found"></span>
+            </label>
+        </td>
+    </tr>
+    <tr>
+        <td class="label-cell">
+            <span class="recognition-label">Digit Recognition Matched:</span>
+        </td>
+        <td class="input-cell">
+            <label for="success">
+                <span class="digit-span" id="success"></span>
+            </label>
+        </td>
+    </tr>
+    <tr>
+        <td class="label-cell">
+            <span class="recognition-label">Recognition Duration (in ms):</span>
+        </td>
+        <td class="input-cell">
+            <label for="duration">
+                <span class="digit-span" id="duration"></span>
+            </label>
+        </td>
+    </tr>
+    <tr>
+        <td class="label-cell">
+            <span class="recognition-label">Maximum Recognition Duration (in ms):</span>
+        </td>
+        <td class="input-cell">
+            <label for="max-duration">
+                <span class="digit-span" id="max-duration"></span>
+            </label>
+        </td>
+    </tr>
+    <tr>
+        <td class="label-cell">
+            <span class="recognition-label">Minimum Recognition Duration (in ms):</span>
+        </td>
+        <td class="input-cell">
+            <label for="min-duration">
+                <span class="digit-span" id="min-duration"></span>
+            </label>
+        </td>
+    </tr>
+    <tr>
+        <td class="label-cell">
+            <span class="recognition-label">Total Recognition Duration (in ms):</span>
+        </td>
+        <td class="input-cell">
+            <label for="total-duration">
+                <span class="digit-span" id="total-duration"></span>
+            </label>
+        </td>
+    </tr>
+    <tr>
+        <td class="label-cell">
+            <span class="recognition-label">Total Correct Guesses:</span>
+        </td>
+        <td class="input-cell">
+            <label for="correct-guesses">
+                <span class="digit-span" id="correct-guesses"></span>
+            </label>
+        </td>
+    </tr>
+    <tr>
+        <td class="label-cell">
+            <span class="recognition-label">Total Wrong Guesses:</span>
+        </td>
+        <td class="input-cell">
+            <label for="wrong-guesses">
+                <span class="digit-span" id="wrong-guesses"></span>
+            </label>
+        </td>
+    </tr>
+    </tbody>
+</table>
+
+<div id="error-message"></div>
+<div id="loading-indicator"></div>
+</body>
+</html>

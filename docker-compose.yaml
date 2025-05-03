@@ -1,0 +1,22 @@
+---
+
+services:
+  redis-stack:
+    container_name: redis-stack
+    image:  redis/redis-stack:latest
+    expose:
+      - 6379
+      - 8001
+    ports:
+      - "6379:6379"
+      - "8001:8001"
+    environment:
+      - REDIS_ARGS=--requirepass redispassword --appendonly yes --appendfsync always
+    command: [ "/entrypoint.sh", "./redis-stack.conf" ]
+    healthcheck:
+      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
+    volumes:
+      - redis_data:/tmp
+
+volumes:
+  redis_data:
